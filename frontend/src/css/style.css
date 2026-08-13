@@ -1,0 +1,10 @@
+@import 'tailwindcss';
+@plugin "daisyui";
+
+@theme {
+  --font-sans: "Zen Maru Gothic", sans-serif;
+  --text-2xs: 0.625rem;
+  --text-3xs: 0.5rem;
+}
+
+/* フォントを変えたい。INDEX.HTMLのHeadタグ内は書き換え済み。

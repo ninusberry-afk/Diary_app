@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Login from './Login';
 import Calendar from './components/Calendar';
 import NoteIcon from './assets/note_icon.svg';
-import DiaryModal from './components/DiaryModal'
+import DiaryModal from './components/DiaryModal';
 import EditModal from './components/EditModal';
+import UpdatePassword from './components/UpdatePassword';
 import {AllEntriesView,DetailView,} from './components/DiaryViews';
+import { supabase } from './lib/supabase';
 
 export type MoodType =
   | 'happy'
@@ -27,7 +29,7 @@ export interface User {
   isLoggedIn: boolean;
 }
 
-// --- 感情アイコンの定義 ---
+// --- 感情アイコン ---
 const moodEmojis: Record<MoodType, string> = {
   happy: '😊',
   tired: '😴',
@@ -36,7 +38,7 @@ const moodEmojis: Record<MoodType, string> = {
   neutral: '😑',
 };
 
-// --- 当日の日付をYYYY-MM-DD形式で取得 ---
+// --- 当日の日付 ---
 const getTodayDateString = () => {
   const today = new Date();
 
@@ -48,15 +50,26 @@ const getTodayDateString = () => {
 };
 
 export function App() {
-  // --- 1. アプリ全体の共通状態（State） ---
-  const [isLoggedIn, setIsLoggedIn] =
-    useState<boolean>(false); // ログイン状態（初期値：未ログイン）
 
-  // 新規登録・ログイン機能の完成後は、ログインしたユーザーのニックネームを設定する
+
+  
+  // ---　アプリ全体の共通状態（State） ---
+  const [isLoggedIn, setIsLoggedIn] =
+    useState<boolean>(false); // ログイン状態
+
+  // パスワード再設定画面を表示するか
+  const [isPasswordRecovery, setIsPasswordRecovery] =
+    useState<boolean>(false);
+
+  // Supabaseのログイン状態を確認中かどうか
+  const [isAuthLoading, setIsAuthLoading] =
+    useState<boolean>(true);
+
+  // 新規登録・ログイン時の名前
   const [nickname, setNickname] =
     useState<string>('ゲスト');
 
-  // モーダル開閉用
+  // モーダル開閉
   const [showDiaryModal, setShowDiaryModal] =
     useState<boolean>(false);
 
@@ -76,58 +89,171 @@ export function App() {
   const [editingEntry, setEditingEntry] =
     useState<DiaryEntry | null>(null);  
 
-  // ダミーの日記データ（5件以上）
+  // --- ページ読み込み時にログイン状態を復元 ---
+  useEffect(() => {
+    let isMounted = true;
+
+    const restoreSession = async () => {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (sessionError) {
+        console.error(
+          'セッション取得エラー:',
+          sessionError,
+        );
+
+        setIsLoggedIn(false);
+        setIsAuthLoading(false);
+        return;
+      }
+
+      // 保存済みのログイン情報がない場合
+      if (!session) {
+        setIsLoggedIn(false);
+        setIsAuthLoading(false);
+        return;
+      }
+
+      // ログイン中のユーザーのニックネームを取得
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabase
+        .from('users')
+        .select('name')
+        .eq('id', session.user.id)
+        .single();
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (profileError) {
+        console.error(
+          'ユーザー情報復元エラー:',
+          profileError,
+        );
+
+        setIsLoggedIn(false);
+        setIsAuthLoading(false);
+        return;
+      }
+
+      setNickname(profile.name);
+      setIsLoggedIn(true);
+      setIsAuthLoading(false);
+    };
+
+    // Supabaseの認証状態の変化を監視
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (event, _session) => {
+        // パスワードリセットメールのリンクから戻った場合
+        if (event === 'PASSWORD_RECOVERY') {
+          setIsPasswordRecovery(true);
+          setIsLoggedIn(false);
+          setIsAuthLoading(false);
+          return;
+        }
+
+        // ログアウトした場合
+        if (event === 'SIGNED_OUT') {
+          setIsPasswordRecovery(false);
+          setIsLoggedIn(false);
+          setIsAuthLoading(false);
+        }
+      },
+    );
+
+    restoreSession();
+
+    return () => {
+      isMounted = false;
+
+      // 認証状態の監視を解除
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // --- ログイン中のユーザーの日記を取得 ---
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setDiaryList([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchDiaries = async () => {
+      setIsDiaryLoading(true);
+
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          id,
+          diary_date,
+          mood,
+          content,
+          created_at
+        `)
+        .order('diary_date', {
+          ascending: false,
+        })
+        .order('created_at', {
+          ascending: false,
+        });
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        console.error(
+          '日記取得エラー:',
+          error,
+        );
+
+        setDiaryList([]);
+        setIsDiaryLoading(false);
+        return;
+      }
+
+      // DBのカラム名をReact側の型へ変換
+      const formattedDiaries: DiaryEntry[] =
+        (data ?? []).map((post) => ({
+          id: post.id,
+          date: post.diary_date,
+          mood: post.mood as MoodType,
+          content: post.content,
+          createdAt: post.created_at,
+        }));
+
+      setDiaryList(formattedDiaries);
+      setIsDiaryLoading(false);
+    };
+
+    fetchDiaries();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isLoggedIn]);
+
+  // Supabaseから取得する日記データ
   const [diaryList, setDiaryList] =
-    useState<DiaryEntry[]>([
-      {
-        id: '1',
-        date: '2026-07-22',
-        mood: 'tired',
-        content:
-          'アラームを4回止めた。起きたら昼だった。まあ、生きてる。それでいい。',
-        createdAt: '2026-07-22 14:00',
-      },
-      {
-        id: '2',
-        date: '2026-07-21',
-        mood: 'neutral',
-        content:
-          '温かいお茶を飲んでぼーっとした。何も進まなかったけど平和。',
-        createdAt: '2026-07-21 16:30',
-      },
-      {
-        id: '3',
-        date: '2026-07-20',
-        mood: 'happy',
-        content:
-          '自炊する気力が湧かずピザを頼んだ。美味しかったのでオールOK。',
-        createdAt: '2026-07-20 19:15',
-      },
-      {
-        id: '4',
-        date: '2026-07-19',
-        mood: 'neutral',
-        content:
-          'コンビニまで歩いた。風が気持ちよかった。',
-        createdAt: '2026-07-19 11:00',
-      },
-      {
-        id: '5',
-        date: '2026-07-18',
-        mood: 'sad',
-        content:
-          'ずっと布団の中にいた。こんな日があってもいいよね。',
-        createdAt: '2026-07-18 22:00',
-      },
-      {
-        id: '6',
-        date: '2026-07-17',
-        mood: 'angry',
-        content:
-          '気づいたら深夜2時。たまには羽目を外すのも大事。',
-        createdAt: '2026-07-17 02:30',
-      },
-    ]);
+    useState<DiaryEntry[]>([]);
+
+  // 日記データを取得中かどうか
+  const [isDiaryLoading, setIsDiaryLoading] =
+    useState<boolean>(false);
 
   // 表示するのは最大5件まで
   const displayedDiaries =
@@ -135,11 +261,12 @@ export function App() {
 
   const todayDate = getTodayDateString();
 
-  // テスト用ログイン処理
-  const handleLogin = () => {
-    // 実際のログイン機能では、
-    // APIから取得したニックネームを設定する
-    setNickname('ゲスト');
+  // --- ログイン処理 ---
+  const handleLogin = (
+    loggedInNickname: string,
+  ) => {
+    // public.usersから取得したニックネームを設定
+    setNickname(loggedInNickname);
     setIsLoggedIn(true);
   };
 
@@ -154,16 +281,31 @@ export function App() {
       return;
     }
 
-    // 新規登録画面で入力されたニックネームを保存
+    // ニックネームを保存
     setNickname(trimmedNickname);
 
-    // 登録後はログイン済みとしてトップページを表示
     setIsLoggedIn(true);
   };
 
-  // --- ログアウト処理 ---
-  const handleLogout = () => {
+  // --- ログアウト ---
+  const handleLogout = async () => {
+    const { error } =
+      await supabase.auth.signOut();
+
+    if (error) {
+      console.error(
+        'ログアウトエラー:',
+        error,
+      );
+
+      return;
+    }
+
+    // Supabaseからログアウトできた後、アプリ内の表示状態を初期化する
     setIsLoggedIn(false);
+    setIsPasswordRecovery(false);
+    setNickname('ゲスト');
+    setDiaryList([]);
     setShowDiaryModal(false);
     setSelectedDate(null);
     setEditingEntry(null);
@@ -171,13 +313,84 @@ export function App() {
     setReturnToAllEntries(false);
   };
 
-  // --- 日記保存処理 ---
-  const handleSaveDiary = (
+  // --- パスワード再設定処理 ---
+  const handleUpdatePassword = async (
+    newPassword: string,
+  ): Promise<void> => {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (error) {
+      console.error(
+        'パスワード更新エラー:',
+        error,
+      );
+
+      throw error;
+    }
+
+    // 更新後はいったんログアウトしてログイン画面へ戻す
+    const { error: signOutError } =
+      await supabase.auth.signOut();
+
+    if (signOutError) {
+      console.error(
+        'パスワード更新後のログアウトエラー:',
+        signOutError,
+      );
+    }
+
+    setIsPasswordRecovery(false);
+    setIsLoggedIn(false);
+    setNickname('ゲスト');
+  };
+
+  // --- 日記保存 ---
+  const handleSaveDiary = async (
     entry: DiaryEntry,
   ) => {
-    // 新しく登録した日記を一覧の先頭へ追加
+    const { data, error } = await supabase
+      .from('posts')
+      .insert({
+        diary_date: entry.date,
+        mood: entry.mood,
+        content: entry.content,
+      })
+      .select(`
+        id,
+        diary_date,
+        mood,
+        content,
+        created_at
+      `)
+      .single();
+
+    if (error) {
+      console.error(
+        '日記登録エラー:',
+        error,
+      );
+
+      alert(
+        '日記を登録できませんでした。もう一度お試しください。',
+      );
+
+      return;
+    }
+
+    // DBのカラム名をReact側の型へ変換
+    const savedDiary: DiaryEntry = {
+      id: data.id,
+      date: data.diary_date,
+      mood: data.mood as MoodType,
+      content: data.content,
+      createdAt: data.created_at,
+    };
+
+    // 登録した日記を画面の一覧へ追加
     setDiaryList((currentDiaryList) => [
-      entry,
+      savedDiary,
       ...currentDiaryList,
     ]);
   };
@@ -228,27 +441,101 @@ export function App() {
     }
   };
 
-  // --- 日記編集処理 ---
-const handleEditDiary = (
-  updatedEntry: DiaryEntry,
-) => {
-  setDiaryList((currentDiaryList) =>
-    currentDiaryList.map((entry) =>
-      entry.id === updatedEntry.id
-        ? updatedEntry
-        : entry,
-    ),
-  );
-};
+  // --- 日記編集 ---
+  const handleEditDiary = async (
+    updatedEntry: DiaryEntry,
+  ) => {
+    const { data, error } = await supabase
+      .from('posts')
+      .update({
+        mood: updatedEntry.mood,
+        content: updatedEntry.content,
+      })
+      .eq('id', updatedEntry.id)
+      .select(`
+        id,
+        diary_date,
+        mood,
+        content,
+        created_at
+      `)
+      .single();
 
-// --- 日記削除処理 ---
-const handleDeleteDiary = (id: string) => {
-  setDiaryList((currentDiaryList) =>
-    currentDiaryList.filter(
-      (entry) => entry.id !== id,
-    ),
-  );
-};
+    if (error) {
+      console.error(
+        '日記編集エラー:',
+        error,
+      );
+
+      alert(
+        '日記を編集できませんでした。もう一度お試しください。',
+      );
+
+      return;
+    }
+
+    // DBのカラム名をReact側の型へ変換
+    const savedDiary: DiaryEntry = {
+      id: data.id,
+      date: data.diary_date,
+      mood: data.mood as MoodType,
+      content: data.content,
+      createdAt: data.created_at,
+    };
+
+    // 編集済みの日記に置き換える
+    setDiaryList((currentDiaryList) =>
+      currentDiaryList.map((entry) =>
+        entry.id === savedDiary.id
+          ? savedDiary
+          : entry,
+      ),
+    );
+  };
+
+// --- 日記削除 ---
+const handleDeleteDiary = async (
+  id: string,
+  ) => {
+    const { error } = await supabase
+      .from('posts')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error(
+        '日記削除エラー:',
+        error,
+      );
+
+      alert(
+        '日記を削除できませんでした。もう一度お試しください。',
+      );
+
+      return;
+    }
+
+    // DBから削除できた後、画面の一覧からも削除
+    setDiaryList((currentDiaryList) =>
+      currentDiaryList.filter(
+        (entry) => entry.id !== id,
+      ),
+    );
+
+    // 削除した日記の詳細画面を閉じる
+    setSelectedDate(null);
+    setEditingEntry(null);
+  };
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-[#f6f4ed] flex items-center justify-center">
+        <p className="text-sm text-stone-400">
+          読み込み中…
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f6f4ed] text-stone-800 font-sans selection:bg-purple-100 pb-12">
@@ -301,14 +588,18 @@ const handleDeleteDiary = (id: string) => {
             : 'max-w-md'
         }`}
       >
-        {/* ---  ログイン画面 --- */}
-        {!isLoggedIn ? (
+        {/* --- パスワード再設定・ログイン・TOP画面の切り替え --- */}
+        {isPasswordRecovery ? (
+          <UpdatePassword
+            onUpdatePassword={handleUpdatePassword}
+          />
+        ) : !isLoggedIn ? (
           <Login
             onLogin={handleLogin}
             onRegister={handleRegister}
           />
         ) : (
-          /* --- 🔵 元のTOPページ画面 --- */
+          /* --- 元のTOPページ画面 --- */
           <>
             {/* ログイン時メッセージ */}
             {isLoggedIn && (
@@ -352,6 +643,15 @@ const handleDeleteDiary = (id: string) => {
               </div>
 
               {/* 5件分ループ表示 */}
+
+              {isDiaryLoading && (
+                <div className="bg-white/80 rounded-2xl p-4 border border-stone-100 text-center">
+                  <p className="text-xs text-stone-400">
+                    日記を読み込んでいます…
+                  </p>
+                </div>
+              )}
+
               {displayedDiaries.map((diary) => (
                 <button
                   type="button"
@@ -389,7 +689,7 @@ const handleDeleteDiary = (id: string) => {
                 </button>
               ))}
 
-              {/* 右下の「日記をすべて見る」リンク（元のグレー系） */}
+              {/*「日記をすべて見る」リンク */}
               {diaryList.length > 5 && (
                 <div className="flex justify-end pt-1">
                   <button
@@ -423,7 +723,7 @@ const handleDeleteDiary = (id: string) => {
         />
       )}
 
-      {/* カレンダーで選択した日付の詳細画面 */}
+      {/* カレンダーで選択後の詳細画面 */}
       {selectedDate && (
         <DetailView
           date={selectedDate}
