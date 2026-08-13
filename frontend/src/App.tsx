@@ -53,9 +53,9 @@ export function App() {
 
 
   
-  // ---　アプリ全体の共通状態（State） ---
+  // ---　アプリ全体 ---
   const [isLoggedIn, setIsLoggedIn] =
-    useState<boolean>(false); // ログイン状態
+    useState<boolean>(false); // ログインの状態
 
   // パスワード再設定画面を表示するか
   const [isPasswordRecovery, setIsPasswordRecovery] =
@@ -151,7 +151,7 @@ export function App() {
       setIsAuthLoading(false);
     };
 
-    // Supabaseの認証状態の変化を監視
+    // Supabaseの認証状態の変化を確認
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
@@ -406,8 +406,7 @@ export function App() {
   const handleTimelineEntrySelect = (
     date: string,
   ) => {
-    // タイムラインから開いたため、
-    // 詳細画面から戻るとトップページへ戻す
+    // タイムラインから開いたため、詳細画面から戻るとトップページへ戻す
     setReturnToAllEntries(false);
 
     // 全件一覧画面は閉じておく
@@ -599,7 +598,7 @@ const handleDeleteDiary = async (
             onRegister={handleRegister}
           />
         ) : (
-          /* --- 元のTOPページ画面 --- */
+          /* --- TOPページ画面 --- */
           <>
             {/* ログイン時メッセージ */}
             {isLoggedIn && (
@@ -689,7 +688,7 @@ const handleDeleteDiary = async (
                 </button>
               ))}
 
-              {/*「日記をすべて見る」リンク */}
+              {/* すべての日記を見る */}
               {diaryList.length > 5 && (
                 <div className="flex justify-end pt-1">
                   <button
@@ -710,7 +709,7 @@ const handleDeleteDiary = async (
         )}
       </main>
 
-      {/* 日記全件一覧画面 */}
+      {/* 日記一覧 */}
       {showAllEntries && (
         <AllEntriesView
           entries={diaryList}
