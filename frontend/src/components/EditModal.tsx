@@ -193,7 +193,7 @@ const EditModal = ({
           disabled={!content.trim()}
           className="w-full py-3.5 rounded-2xl font-bold bg-purple-300 text-white disabled:bg-stone-200 disabled:text-stone-400 active:scale-[0.98]"
         >
-          保存する　✓
+          保存する ✓
         </button>
 
         <button

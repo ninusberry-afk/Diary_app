@@ -29,7 +29,7 @@ const PwReset = ({ onReset, onGoLogin }: PwResetProps) => {
       setIsDone(true);
     } catch {
       setErrorMessage(
-        'パスワードをリセットできませんでした。もう一度お試しください。',
+        'パスワードを変更できませんでした。もう一度お試しください。',
       );
     } finally {
       setIsSubmitting(false);
@@ -80,7 +80,7 @@ const PwReset = ({ onReset, onGoLogin }: PwResetProps) => {
 
         <div>
           <h2 className="text-lg font-bold text-stone-800 leading-tight">
-            パスワードリセット
+            パスワード変更
           </h2>
 
           <p className="text-xs text-stone-400 mt-0.5">
@@ -130,8 +130,8 @@ const PwReset = ({ onReset, onGoLogin }: PwResetProps) => {
           }`}
         >
           {isSubmitting
-            ? 'リセットしています…'
-            : 'パスワードをリセットする'}
+            ? '変更しています…'
+            : 'パスワードを変更する'}
         </button>
       </form>
     </div>

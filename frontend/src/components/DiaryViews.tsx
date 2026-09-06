@@ -1,6 +1,3 @@
-
-
-
 import { useEffect, useState } from 'react';
 
 type MoodType = 'happy' | 'tired' | 'sad' | 'angry' | 'neutral';

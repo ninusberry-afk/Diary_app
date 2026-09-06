@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 import Login from './Login';
+import MyPage from './MyPage';
+import ProfileFieldEdit from './components/my-page/ProfileFieldEdit';
+import PasswordEdit from './components/my-page/PasswordEdit';
+import DeleteAccount from './components/DeleteAccount';
 import Calendar from './components/Calendar';
 import NoteIcon from './assets/note_icon.svg';
 import DiaryModal from './components/DiaryModal';
@@ -29,6 +33,14 @@ export interface User {
   isLoggedIn: boolean;
 }
 
+type CurrentPage =
+  | 'home'
+  | 'myPage'
+  | 'editName'
+  | 'editEmail'
+  | 'editPassword'
+  | 'deleteAccount';
+
 // --- 感情アイコン ---
 const moodEmojis: Record<MoodType, string> = {
   happy: '😊',
@@ -53,7 +65,7 @@ export function App() {
 
 
   
-  // ---　アプリ全体 ---
+  // --- アプリ全体 ---
   const [isLoggedIn, setIsLoggedIn] =
     useState<boolean>(false); // ログインの状態
 
@@ -68,6 +80,14 @@ export function App() {
   // 新規登録・ログイン時の名前
   const [nickname, setNickname] =
     useState<string>('ゲスト');
+
+  // ログイン中のメールアドレス
+  const [email, setEmail] =
+    useState<string>('');
+
+  // 現在表示している画面
+  const [currentPage, setCurrentPage] =
+    useState<CurrentPage>('home');
 
   // モーダル開閉
   const [showDiaryModal, setShowDiaryModal] =
@@ -85,11 +105,19 @@ export function App() {
   const [returnToAllEntries, setReturnToAllEntries] =
     useState<boolean>(false);
 
-// 編集する日記
+  // 編集する日記
   const [editingEntry, setEditingEntry] =
     useState<DiaryEntry | null>(null);  
 
-  // --- ページ読み込み時にログイン状態を復元 ---
+  // Supabaseから取得する日記データ
+  const [diaryList, setDiaryList] =
+    useState<DiaryEntry[]>([]);
+
+  // 日記データを取得中かどうか
+  const [isDiaryLoading, setIsDiaryLoading] =
+    useState<boolean>(false);
+
+    // --- ページ読み込み時にログイン状態を復元 ---
   useEffect(() => {
     let isMounted = true;
 
@@ -147,6 +175,8 @@ export function App() {
       }
 
       setNickname(profile.name);
+      setEmail(session.user.email ?? '');
+      setCurrentPage('home');
       setIsLoggedIn(true);
       setIsAuthLoading(false);
     };
@@ -155,13 +185,22 @@ export function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
-      (event, _session) => {
+      (event, session) => {
         // パスワードリセットメールのリンクから戻った場合
         if (event === 'PASSWORD_RECOVERY') {
           setIsPasswordRecovery(true);
           setIsLoggedIn(false);
           setIsAuthLoading(false);
           return;
+        }
+
+        // ログインしたユーザーのメールアドレスを保存
+        if (
+          (event === 'SIGNED_IN' ||
+            event === 'USER_UPDATED') &&
+          session
+        ) {
+          setEmail(session.user.email ?? '');
         }
 
         // ログアウトした場合
@@ -186,7 +225,6 @@ export function App() {
   // --- ログイン中のユーザーの日記を取得 ---
   useEffect(() => {
     if (!isLoggedIn) {
-      setDiaryList([]);
       return;
     }
 
@@ -247,14 +285,6 @@ export function App() {
     };
   }, [isLoggedIn]);
 
-  // Supabaseから取得する日記データ
-  const [diaryList, setDiaryList] =
-    useState<DiaryEntry[]>([]);
-
-  // 日記データを取得中かどうか
-  const [isDiaryLoading, setIsDiaryLoading] =
-    useState<boolean>(false);
-
   // 表示するのは最大5件まで
   const displayedDiaries =
     diaryList.slice(0, 5);
@@ -267,6 +297,7 @@ export function App() {
   ) => {
     // public.usersから取得したニックネームを設定
     setNickname(loggedInNickname);
+    setCurrentPage('home');
     setIsLoggedIn(true);
   };
 
@@ -283,9 +314,199 @@ export function App() {
 
     // ニックネームを保存
     setNickname(trimmedNickname);
-
+    setCurrentPage('home');
     setIsLoggedIn(true);
   };
+
+  // --- マイページを開く ---
+  const handleOpenMyPage = () => {
+    // 開いている日記関連の画面を閉じる
+    setShowDiaryModal(false);
+    setSelectedDate(null);
+    setEditingEntry(null);
+    setShowAllEntries(false);
+    setReturnToAllEntries(false);
+
+    setCurrentPage('myPage');
+  };
+
+  // --- マイページからTOPへ戻る ---
+  const handleMyPageBack = () => {
+    setCurrentPage('home');
+  };
+
+  // --- 名前変更処理 ---
+  const handleUpdateName = async (
+    newName: string,
+  ): Promise<void> => {
+    const trimmedName = newName.trim();
+
+    if (!trimmedName) {
+      throw new Error(
+        '名前が入力されていません。',
+      );
+    }
+
+    // 現在ログイン中のユーザーを取得
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      console.error(
+        'ユーザー取得エラー:',
+        userError,
+      );
+
+      throw (
+        userError ??
+        new Error(
+          'ログインユーザーを取得できませんでした。',
+        )
+      );
+    }
+
+    // public.usersの名前を更新
+    const {
+      data,
+      error: updateError,
+    } = await supabase
+      .from('users')
+      .update({
+        name: trimmedName,
+      })
+      .eq('id', user.id)
+      .select('name')
+      .single();
+
+    if (updateError) {
+      console.error(
+        '名前変更エラー:',
+        updateError,
+      );
+
+      throw updateError;
+    }
+
+    // 画面上の名前も更新
+    setNickname(data.name);
+  };
+
+  // --- メールアドレス変更処理 ---
+  const handleUpdateEmail = async (
+    newEmail: string,
+  ): Promise<void> => {
+    const trimmedEmail = newEmail.trim();
+
+    const isEmailValid =
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+        trimmedEmail,
+      );
+
+    if (!isEmailValid) {
+      throw new Error(
+        'メールアドレスの形式が正しくありません。',
+      );
+    }
+
+    if (trimmedEmail === email) {
+      throw new Error(
+        '現在と同じメールアドレスです。',
+      );
+    }
+
+    const { error } =
+      await supabase.auth.updateUser({
+        email: trimmedEmail,
+      });
+
+    if (error) {
+      console.error(
+        'メールアドレス変更エラー:',
+        error,
+      );
+
+      throw error;
+    }
+
+    alert(
+      '確認メールを送信しました。メール内のリンクを開くと変更が完了します。',
+    );
+  };
+
+    const handleChangePassword = async (
+      currentPassword: string,
+      newPassword: string,
+    ): Promise<void> => {
+      if (!email) {
+        throw new Error('ログイン中のメールアドレスを取得できません。');
+      }
+
+      // 現在のパスワードが正しいか確認
+      const { error: signInError } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password: currentPassword,
+        });
+
+      if (signInError) {
+        console.error('現在のパスワード確認エラー:', signInError);
+        throw new Error('現在のパスワードが正しくありません。');
+      }
+
+      // 新しいパスワードに更新
+      const { error: updateError } =
+        await supabase.auth.updateUser({
+          password: newPassword,
+        });
+
+      if (updateError) {
+        console.error('パスワード変更エラー:', updateError);
+        throw updateError;
+      }
+
+      alert('パスワードを変更しました。');
+    };
+
+    // --- アカウント削除 ---
+    const handleDeleteAccount = async (): Promise<void> => {
+      const { data, error } =
+        await supabase.functions.invoke('delete-account');
+
+      if (error) {
+        console.error('アカウント削除エラー:', error);
+        throw error;
+      }
+
+      if (!data?.success) {
+        console.error('アカウント削除失敗:', data);
+        throw new Error(
+          data?.error ?? 'アカウントを削除できませんでした。',
+        );
+      }
+
+      // このブラウザに残っているログイン情報を削除
+      const { error: signOutError } =
+        await supabase.auth.signOut({
+          scope: 'local',
+        });
+
+      if (signOutError) {
+        console.error(
+          'アカウント削除後のログアウトエラー:',
+          signOutError,
+        );
+      }
+
+      setDiaryList([]);
+      setNickname('ゲスト');
+      setEmail('');
+      setCurrentPage('home');
+      setIsLoggedIn(false);
+
+      alert('登録を削除しました。');
+    };
 
   // --- ログアウト ---
   const handleLogout = async () => {
@@ -305,6 +526,8 @@ export function App() {
     setIsLoggedIn(false);
     setIsPasswordRecovery(false);
     setNickname('ゲスト');
+    setEmail('');
+    setCurrentPage('home');
     setDiaryList([]);
     setShowDiaryModal(false);
     setSelectedDate(null);
@@ -567,14 +790,14 @@ const handleDeleteDiary = async (
             </div>
           </div>
 
-          {/* ログイン/ログアウトボタン */}
-          {isLoggedIn && (
+          {/* マイページボタン */}
+          {isLoggedIn && currentPage === 'home' && (
             <button
               type="button"
-              onClick={handleLogout}
-              className="shrink-0 px-3 sm:px-4 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-700 text-xs font-bold rounded-xl shadow-xs transition-all active:scale-95 flex items-center gap-1.5"
+              onClick={handleOpenMyPage}
+              className="shrink-0 px-3 sm:px-4 py-1.5 bg-gradient-to-r from-purple-300 to-pink-200 hover:opacity-95 text-stone-700 text-xs font-bold rounded-xl shadow-sm transition-all active:scale-95"
             >
-              Logout
+              マイページ
             </button>
           )}
         </div>
@@ -596,6 +819,58 @@ const handleDeleteDiary = async (
           <Login
             onLogin={handleLogin}
             onRegister={handleRegister}
+          />
+        ) : currentPage === 'deleteAccount' ? (
+         <DeleteAccount
+            onBack={() => {
+              setCurrentPage('myPage');
+            }}
+            onDelete={handleDeleteAccount}
+          />
+        ) : currentPage === 'editPassword' ? (
+            <PasswordEdit
+              onBack={() => {
+                setCurrentPage('myPage');
+              }}
+              onSave={handleChangePassword}
+            />
+
+        ) : currentPage === 'editEmail' ? (
+          <ProfileFieldEdit
+            field="email"
+            initialValue={email}
+            onBack={() => {
+              setCurrentPage('myPage');
+            }}
+            onSave={handleUpdateEmail}
+          />
+        ) : currentPage === 'editName' ? (
+          <ProfileFieldEdit
+            field="name"
+            initialValue={nickname}
+            onBack={() => {
+              setCurrentPage('myPage');
+            }}
+            onSave={handleUpdateName}
+          />
+        ) : currentPage === 'myPage' ? (
+          <MyPage
+            nickname={nickname}
+            email={email}
+            onBack={handleMyPageBack}
+            onEditName={() => {
+              setCurrentPage('editName');
+            }}
+            onEditEmail={() => {
+              setCurrentPage('editEmail');
+            }}
+            onEditPassword={() => {
+              setCurrentPage('editPassword');
+            }}
+            onLogout={handleLogout}
+            onDeleteAccount={() => {
+              setCurrentPage('deleteAccount');
+            }}
           />
         ) : (
           /* --- TOPページ画面 --- */

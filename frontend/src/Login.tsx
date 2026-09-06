@@ -130,8 +130,7 @@ export function Login({
         profileError,
       );
 
-      // プロフィールを取得できなかった場合は
-      // 中途半端なログイン状態を残さない
+      // プロフィールを取得できなかった場合
       await supabase.auth.signOut();
 
       setIsSubmitting(false);
@@ -173,8 +172,7 @@ export function Login({
       email: trimmedEmail,
       password: registerPassword,
       options: {
-        // public.usersへ保存するため、
-        // auth.usersのメタデータへ名前を渡す
+        // public.usersへ保存するため、auth.usersのメタデータへ名前を渡す
         data: {
           name: trimmedNickname,
         },
@@ -196,8 +194,7 @@ export function Login({
     return;
   }
 
-  // メール確認が無効の場合は、
-  // 登録直後にセッションが作成される
+  // メール確認が無効の場合は登録直後にセッションが作成される
   if (data.session) {
     onRegister(trimmedNickname);
     return;
@@ -355,7 +352,7 @@ export function Login({
             />
           </div>
 
-          {/* パスワード確認入力 */}
+          {/* パスワード確認 */}
           <div>
             <label
               htmlFor="register-password-confirm"
